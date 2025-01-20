@@ -3,11 +3,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException  # 추가
 
 import pyperclip
 import time
 import schedule
+import sys
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -18,12 +19,12 @@ from tkinter import ttk, messagebox
 import threading
 
 # 서비스 계정 JSON 파일 경로
-SERVICE_ACCOUNT_FILE = "aa.json"
-SPREADSHEET_ID = "aa"
-DEFAULT_SHEET_NAME = "Sheet1"
+SERVICE_ACCOUNT_FILE = ".json"
+SPREADSHEET_ID = ""
+DEFAULT_SHEET_NAME = ""
 
-NAVER_ID = "aa"
-NAVER_PASSWORD = "aa"
+NAVER_ID = ""
+NAVER_PASSWORD = ""
 
 # Tkinter GUI 초기화 함수
 def initialize_gui():
@@ -218,7 +219,8 @@ def naver_login(driver, naver_id, naver_pw):
     - naver_pw: 사용자의 네이버 비밀번호.
     """
     url = 'https://nid.naver.com/nidlogin.login?mode=form&url=https://blog.naver.com/'
-    driver.get(url)
+    
+    open_webpage(driver, url)
 
     # ID 입력 필드 대기 후 복사하여 붙여넣기
     id_field = WebDriverWait(driver, 5).until(
@@ -284,6 +286,15 @@ def wait_and_click(driver, xpath, timeout=1):
         print(f"예상치 못한 오류 발생: {e}")
     return False
 
+def open_webpage(driver, url):
+    try:
+        driver.get(url)  # 웹페이지 열기
+    except Exception as e:
+        # 오류 메시지 박스 띄우기
+        messagebox.showerror("오류", "인터넷 창에 문제가 발생했습니다.\n프로그램을 다시 실행해주세요!")
+        # 프로그램 종료
+        sys.exit(1)
+
 # 구글 스프레드시트 초기화 함수
 def initialize_service():
     credentials = Credentials.from_service_account_file(
@@ -311,6 +322,37 @@ def initialize_sheet(service, spreadsheet_id, sheet_name):
         body=body
     ).execute()
 
+    # 기존 데이터 읽기
+    range_name = f"{sheet_name}!A1:H"
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=range_name
+    ).execute()
+    rows = result.get("values", [])
+    
+    # 빈 행 제거 및 데이터 압축
+    compressed_rows = [row for row in rows if any(cell.strip() for cell in row)]
+    
+    # 기존 데이터 삭제
+    clear_body = {}
+    service.spreadsheets().values().clear(
+        spreadsheetId=spreadsheet_id,
+        range=range_name,
+        body=clear_body
+    ).execute()
+    
+    # 압축된 데이터 쓰기
+    write_range = f"{sheet_name}!A1"
+    body = {"values": compressed_rows}
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=write_range,
+        valueInputOption="RAW",
+        body=body
+    ).execute()
+
+    print("데이터가 압축되어 업데이트되었습니다.")
+
     # 서식 설정 요청 생성
     requests = [
         # 필터링 기능 추가 요청
@@ -320,7 +362,7 @@ def initialize_sheet(service, spreadsheet_id, sheet_name):
                     "range": {
                         "sheetId": 0,  # 기본 시트 ID
                         "startRowIndex": 0,  # 헤더 포함
-                        "startColumnIndex": 3,  # D 열 시작
+                        "startColumnIndex": 0,  # D 열 시작
                         "endColumnIndex": 8   # H 열 끝 (H + 1)
                     }
                 }
@@ -393,7 +435,6 @@ def initialize_sheet(service, spreadsheet_id, sheet_name):
         spreadsheetId=spreadsheet_id,
         body={"requests": requests}
     ).execute()
-
 
 # 마지막 데이터 행의 다음 행 인덱스를 반환하는 함수
 def get_next_empty_row_index(service, spreadsheet_id, sheet_name):
@@ -487,7 +528,9 @@ def scrape_blog_data(driver, keyword):
     blog_data = []
     base_url = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query="
     search_url = base_url + keyword
-    driver.get(search_url)
+
+    open_webpage(driver, search_url)
+
     time.sleep(2)
 
     # 페이지 스크롤
@@ -540,8 +583,8 @@ def collect_additional_data(driver, blog_data):
         try:
             parts = link.split('/')
             mobile_main_blog = f"https://m.blog.naver.com/{parts[3]}"
-            driver.get(mobile_main_blog)
-
+         
+            open_webpage(driver, mobile_main_blog)
             try:
                 today_visitors_text = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '//div[@class="cover_content__OApzT"]//div[@class="count__T3YO8"]'))
@@ -599,7 +642,6 @@ def filter_and_transform_links(service, spreadsheet_id, sheet_name):
             filtered_links.append([row[0], mobile_link, idx])  # 닉네임(A열), 모바일 링크 반환
     return filtered_links
 
-
 def convert_to_mobile_link(link):
     """
     PC 링크를 모바일 링크로 변환합니다.
@@ -643,7 +685,7 @@ def add_neighbors(driver, links, message, max_count=100):
             print("Midnight detected. Stopping process temporarily.")
             return i  # 중단된 작업의 인덱스를 반환
 
-        driver.get(link)
+        open_webpage(driver, link)
 
         try:
             # 이웃추가 버튼 클릭
