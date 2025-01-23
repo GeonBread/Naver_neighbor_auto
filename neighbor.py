@@ -19,7 +19,7 @@ from tkinter import ttk, messagebox
 import threading
 
 # 서비스 계정 JSON 파일 경로
-SERVICE_ACCOUNT_FILE = ".json"
+SERVICE_ACCOUNT_FILE = ""
 SPREADSHEET_ID = ""
 DEFAULT_SHEET_NAME = ""
 
@@ -115,9 +115,11 @@ def collect_blog_data():
                 loading_window.destroy()
                 messagebox.showinfo("완료", f"'{keyword}'에 대한 블로그가 없습니다!")
                 return
-            if not blog_data:
+            elif not blog_data:
                 loading_window.destroy()
                 messagebox.showinfo("완료", f"작업이 중단되었습니다.")
+                return
+            elif blog_data == -1:
                 return
 
             progress_bar["value"] = percent
@@ -289,11 +291,11 @@ def wait_and_click(driver, xpath, timeout=1):
 def open_webpage(driver, url):
     try:
         driver.get(url)  # 웹페이지 열기
+        return True
     except Exception as e:
         # 오류 메시지 박스 띄우기
         messagebox.showerror("오류", "인터넷 창에 문제가 발생했습니다.\n프로그램을 다시 실행해주세요!")
-        # 프로그램 종료
-        sys.exit(1)
+        return False
 
 # 구글 스프레드시트 초기화 함수
 def initialize_service():
@@ -326,7 +328,8 @@ def initialize_sheet(service, spreadsheet_id, sheet_name):
     range_name = f"{sheet_name}!A1:H"
     result = service.spreadsheets().values().get(
         spreadsheetId=spreadsheet_id,
-        range=range_name
+        range=range_name,
+        valueRenderOption = "UNFORMATTED_VALUE"
     ).execute()
     rows = result.get("values", [])
     
@@ -529,7 +532,8 @@ def scrape_blog_data(driver, keyword):
     base_url = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query="
     search_url = base_url + keyword
 
-    open_webpage(driver, search_url)
+    if not open_webpage(driver, search_url):
+        return -1
 
     time.sleep(2)
 
@@ -584,7 +588,10 @@ def collect_additional_data(driver, blog_data):
             parts = link.split('/')
             mobile_main_blog = f"https://m.blog.naver.com/{parts[3]}"
          
-            open_webpage(driver, mobile_main_blog)
+            #창 오류가 생기면 우선 작업한 부분까지는 저장하도록..
+            if not open_webpage(driver, mobile_main_blog):
+                return blog_data[0:index]
+
             try:
                 today_visitors_text = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '//div[@class="cover_content__OApzT"]//div[@class="count__T3YO8"]'))
@@ -665,6 +672,8 @@ def add_neighbors(driver, links, message, max_count=100):
     row_index, count = initialize_today_neighbors(service, SPREADSHEET_ID, DEFAULT_SHEET_NAME)
     percent_unit = 100 / (len(links) + 1)
 
+    before_day = datetime.now().day
+    
     for i, (nickname, link, idx) in enumerate(links):        
         time.sleep(1)
         #중단 요청 시 루프 종료
@@ -679,13 +688,14 @@ def add_neighbors(driver, links, message, max_count=100):
             print("Reached maximum count for today.")
             return -2
 
-        # 자정 감지
-        now = datetime.now()
-        if now.hour == 0 and now.minute == 0:  # 자정 확인
+        # 시간 넘어간다면?
+        now_day = datetime.now().day
+        if before_day != now_day:
             print("Midnight detected. Stopping process temporarily.")
             return i  # 중단된 작업의 인덱스를 반환
 
-        open_webpage(driver, link)
+        if not open_webpage(driver, link):
+            return
 
         try:
             # 이웃추가 버튼 클릭
