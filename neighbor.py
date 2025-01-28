@@ -4,6 +4,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException  # 추가
+from selenium.webdriver.support.ui import Select
 
 import pyperclip
 import time
@@ -19,18 +20,23 @@ from tkinter import ttk, messagebox
 import threading
 
 # 서비스 계정 JSON 파일 경로
-SERVICE_ACCOUNT_FILE = ""
-SPREADSHEET_ID = ""
-DEFAULT_SHEET_NAME = ""
+SERVICE_ACCOUNT_FILE 
+SPREADSHEET_ID 
+DEFAULT_SHEET_NAME 
 
-NAVER_ID = ""
-NAVER_PASSWORD = ""
+NAVER_ID 
+NAVER_PASSWORD
+
+MY_BLOG_NICKNAME 
 
 # Tkinter GUI 초기화 함수
 def initialize_gui():
-    global window, keyword_entry, message_entry, progress_bar, loading_label, progress_label, loading_window, collected_data
+    global window, keyword_entry, message_entry, progress_bar, progress_label, loading_window
+    global group_name
+    
     width = 400
-    height = 400
+    height = 500
+
 
     window = tk.Tk()
     window.title("밤비봉 이웃 관리 프로그램")
@@ -54,7 +60,17 @@ def initialize_gui():
     message_entry = tk.Text(window, height=5, width=30, font=("Arial", 12))
     message_entry.pack(pady=5)
 
+    # 이웃 그룹 선택 섹션
+    tk.Label(window, text="이웃 그룹 선택", font=("Arial", 12)).pack(pady=5)
+    group_name = tk.StringVar(value="그룹을 선택하세요")  # 기본값 설정
+    group_menu = tk.OptionMenu(window, group_name, *group_names)
+    group_menu.config(font=("Arial", 12))
+    group_menu.pack(pady=5)
+
     tk.Button(window, text="서로이웃 추가 시작", font=("Arial", 12), command=add_neighborhood).pack(pady=10)
+
+    # 이웃 삭제 버튼
+    tk.Button(window, text="이웃 삭제", font=("Arial", 12), command=delete_neighbors).pack(pady=10)
 
 
 # 로딩 창 초기화 함수
@@ -120,6 +136,7 @@ def collect_blog_data():
                 messagebox.showinfo("완료", f"작업이 중단되었습니다.")
                 return
             elif blog_data == -1:
+                loading_window.destroy()
                 return
 
             progress_bar["value"] = percent
@@ -144,7 +161,7 @@ def collect_blog_data():
         except Exception as e:
             loading_window.destroy()
             print(e)
-            messagebox.showerror("오류", f"작업 중 문제가 발생했습니다: {str(e)}")
+            messagebox.showerror("오류", f"작업 중 문제가 발생했습니다 : {e}")
 
     threading.Thread(target=scrape).start()
 
@@ -153,10 +170,15 @@ def add_neighborhood():
     
     global stop_flag
     stop_flag = False  # 중단 플래그 초기화
+    _group_name = group_name.get()
 
     message = message_entry.get("1.0", tk.END).strip()
     if not message:
         messagebox.showerror("오류", "메시지를 입력하세요!")
+        return
+    #그룹이 아직 안 정해졌다면
+    if _group_name == "그룹을 선택하세요":
+        messagebox.showerror("오류", "이웃 그룹을 선택해주세요!")
         return
 
     messagebox.showinfo("완료", f"다음 메시지로 서로이웃 신청을 시작합니다:\n\n{message}")
@@ -174,21 +196,38 @@ def add_neighborhood():
 
         while start_index != -1:
             print(f"Starting from index: {start_index}")
-            start_index = add_neighbors(driver, links[start_index:], message, max_count=100)
+            start_index = add_neighbors(driver, links[start_index:], message, _group_name, max_count=100)
 
-            if start_index >= -3 and start_index <= -1 :
+            if start_index >= -5 and start_index <= -1 :
                 break
         
         loading_window.destroy()
         if start_index == -1:
             messagebox.showinfo("완료", f"이웃 추가 완료했습니다")
-        if start_index == -2: #하루 신청 수 100명 채운 경우
+        elif start_index == -2: #하루 신청 수 100명 채운 경우
             messagebox.showinfo("완료", f"오늘 하루 신청 수 다 채웠습니다!");
-        if start_index == -3: #중단한 경우
+        elif start_index == -3: #중단한 경우
             messagebox.showinfo("완료", f"작업 중단하였습니다.")
+        elif start_index == -4: #이웃 그룹 수가 전부 찼을 경우
+            #그룹 명에 대한 언급도 있으면 좋을 듯
+            messagebox.showinfo("수정 요청", f"{_group_name} 그룹 수가 다 찼으니 다른 그룹을 선택한 후 서로 이웃 추가를 진행해주세요!")
+        else:
+            pass
+
+
 
     threading.Thread(target=scrape).start()
 
+def delete_neighbors():
+
+    selected_group = group_name.get()  # 선택된 그룹 이름 가져오기
+    if selected_group == "그룹을 선택하세요":
+        messagebox.showerror("오류", "먼저 이웃 그룹을 선택해주세요요!")
+
+    else :
+        _delete_regular_neighbors(driver, MY_BLOG_NICKNAME)
+
+    return
 # 확정 로딩바 작업 함수
 def start_loading_task():
     initialize_loading_window()
@@ -203,12 +242,51 @@ def start_loading_task():
 
     threading.Thread(target=background_task).start()
 
-
 def stop_task():
     global stop_flag
     if messagebox.askyesno("중단 확인", "작업을 중단하시겠습니까?"):
         stop_flag = True  # 중단 플래그 설정
 
+def group_name_check(driver, blog_nickname):
+    global group_names
+    group_names = []
+
+    try:
+        # 기본 URL 설정 (블로그 닉네임 포함)
+        url = f"https://admin.blog.naver.com/{blog_nickname}/config/bloginfo"
+        open_webpage(driver, url)
+
+        # 내가 추가한 이웃 클릭
+        wait_and_click(driver, '//*[@id="buddylist_config_anchor"]')
+
+        # iframe 전환
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "papermain"))
+        )
+        driver.switch_to.frame("papermain")
+        
+        # 이웃 그룹 클릭
+        wait_and_click(driver, '//*[@id="wrap"]/ul/li[2]/a')
+
+        # 이웃 그룹 정보 크롤링
+        tbody = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//*[@id="wrap"]/table/tbody'))
+        )
+
+        # tbody 내의 모든 tr 태그 가져오기
+        rows = tbody.find_elements(By.TAG_NAME, 'tr')
+
+        for row in rows:
+            try:
+                # 각 tr 내의 span 태그에서 그룹 이름 추출
+                group_name = row.find_element(By.XPATH, './/span[@class="editable"]').text
+                group_names.append(group_name)
+            except Exception as e:
+                print("Error extracting group name:", e)
+                continue
+
+    except Exception as e:
+        print("An error occurred:", e)
 
 #네이버 로그인하는 함수
 def naver_login(driver, naver_id, naver_pw):
@@ -224,40 +302,105 @@ def naver_login(driver, naver_id, naver_pw):
     
     open_webpage(driver, url)
 
-    # ID 입력 필드 대기 후 복사하여 붙여넣기
-    id_field = WebDriverWait(driver, 5).until(
-        EC.presence_of_element_located((By.ID, "id"))
-    )
-    id_field.click()
-    clipboard_backup = pyperclip.paste()  # 기존 클립보드 내용을 백업
-    pyperclip.copy(naver_id)  # ID를 클립보드로 복사
-    
-    actions = webdriver.ActionChains(driver)
-    actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
-    time.sleep(1)  # 봇 탐지를 피하기 위해 대기
+    try :
+        # ID 입력 필드 대기 후 복사하여 붙여넣기
+        id_field = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "id"))
+        )
+        id_field.click()
+        clipboard_backup = pyperclip.paste()  # 기존 클립보드 내용을 백업
+        pyperclip.copy(naver_id)  # ID를 클립보드로 복사
+        
+        actions = webdriver.ActionChains(driver)
+        actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+        time.sleep(1)  # 봇 탐지를 피하기 위해 대기
 
-    # 비밀번호 입력 필드 대기 후 복사하여 붙여넣기
-    pw_field = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.ID, "pw"))
-    )
-    pw_field.click()
-    pyperclip.copy(naver_pw)  # 비밀번호를 클립보드로 복사
-    actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
-    time.sleep(1)  # 봇 탐지를 피하기 위해 대기
+        # 비밀번호 입력 필드 대기 후 복사하여 붙여넣기
+        pw_field = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "pw"))
+        )
+        pw_field.click()
+        pyperclip.copy(naver_pw)  # 비밀번호를 클립보드로 복사
+        actions.key_down(Keys.CONTROL).send_keys('v').key_up(Keys.CONTROL).perform()
+        time.sleep(1)  # 봇 탐지를 피하기 위해 대기
 
-    # 기존 클립보드 내용을 복원
-    pyperclip.copy(clipboard_backup)
+        # 기존 클립보드 내용을 복원
+        pyperclip.copy(clipboard_backup)
 
-    # 로그인 버튼 클릭
-    login_button = WebDriverWait(driver, 5).until(
-        EC.presence_of_element_located((By.ID, "log.login"))
-    )
-    login_button.click()
+        # 로그인 버튼 클릭
+        login_button = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.ID, "log.login"))
+        )
+        login_button.click()
 
+    except Exception as e:
+        # 오류 메시지 박스 띄우기
+        messagebox.showerror("오류", "인터넷 창에 문제가 발생했습니다.\n프로그램을 다시 실행해주세요!")
+        return False
+        
     print("로그인 프로세스가 시작되었습니다.")
-    
+
+def _delete_regular_neighbors(driver, blog_nickname):
+    try:
+        idx = str(group_names.index(group_name.get()) + 1)
+        class_name = f"ellipsis1 selectbox-item({idx})"
+        
+        # 기본 URL 설정 (블로그 닉네임 포함)
+        url = f"https://admin.blog.naver.com/{blog_nickname}/config/bloginfo"
+        open_webpage(driver, url)
+
+        # 내가 추가한 이웃 클릭
+        wait_and_click(driver, '//*[@id="buddylist_config_anchor"]')
+        
+        # iframe 전환
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "papermain"))
+        )
+        driver.switch_to.frame("papermain")
+
+        while True:
+            # 그룹 목록 클릭
+            wait_and_click(driver, '//*[@id="buddysel_groupall"]/div[1]/span')
+
+            # 특정 그룹 이름 선택
+            wait_and_click(driver, f'//li[contains(@class, "{class_name}")]')
+            
+            time.sleep(1)
+            # 이웃, 서로이웃 선택 클릭
+            wait_and_click(driver, '//*[@id="buddysel_buudyall"]/div[1]/span')
+            
+            # "이웃" 선택
+            wait_and_click(driver, '//*[@id="buddysel_buudyall"]/div[2]/ul/li[2]')
+
+            time.sleep(1)
+            #이웃 있는지 없는지 체크하는 구문 들어가야 함.
+            is_neighbor_exist = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//*[@id="buddyListManageForm"]/table/tbody/tr/td'))
+            ).text
+
+            if is_neighbor_exist == "관리중인 이웃이 없습니다.":
+                messagebox.showinfo("완료", f"작업이 완료되었습니다.")
+                break
+
+            # 전체 체크박스 클릭
+            wait_and_click(driver, '//*[@id="buddyListManageForm"]/table/thead/tr/th[1]/input')
+
+            # 삭제 버튼 클릭
+            wait_and_click(driver, '//*[@id="buddyListManageForm"]/div[2]/div/span[4]/button')
+            #이웃 없는데 삭제버튼 무르면 "이웃을 먼저 선택해 주세요." 경고창 뜸
+
+
+            # 확인 클릭
+            wait_and_click(driver, '//*[@id="tpl_layer_del"]/div/div/fieldset/div/input')
+
+            time.sleep(2)  # 삭제 후 페이지 새로고침 대기
+
+    except Exception as e:
+        #사이트가 꺼져서 여기로 온 건지 확인인
+        messagebox.showerror("오류 발생:", e)
+        
 #기다렸다가 요소가 보이면 바로 클릭하는 함수
-def wait_and_click(driver, xpath, timeout=1):
+def wait_and_click(driver, xpath, timeout=5):
     """
     WebDriverWait를 사용하여 지정된 XPATH의 요소가 클릭 가능할 때까지 기다린 후 클릭합니다.
 
@@ -532,6 +675,7 @@ def scrape_blog_data(driver, keyword):
     base_url = "https://search.naver.com/search.naver?ssc=tab.blog.all&sm=tab_jum&query="
     search_url = base_url + keyword
 
+    
     if not open_webpage(driver, search_url):
         return -1
 
@@ -573,7 +717,7 @@ def collect_additional_data(driver, blog_data):
     percent = 10
     addPercent = 85 / len(blog_data)
     today = datetime.now().strftime("%Y. %m. %d")  # 오늘 날짜 서식
-    
+
     for index, entry in enumerate(blog_data):
         #중단 요청 시 루프 종료
         if stop_flag:
@@ -591,7 +735,17 @@ def collect_additional_data(driver, blog_data):
             #창 오류가 생기면 우선 작업한 부분까지는 저장하도록..
             if not open_webpage(driver, mobile_main_blog):
                 return blog_data[0:index]
-
+            
+            #먼저 이웃인지 아닌지 체크부터 (서로이웃인 경우만 패스하기)
+            try:
+                neighbor_check = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.XPATH, '//*[@id="root"]/div[4]/div/div[3]/div[1]/button'))
+                    ).text
+                if neighbor_check == "서로이웃":
+                    continue
+            except Exception:
+                pass
+            
             try:
                 today_visitors_text = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '//div[@class="cover_content__OApzT"]//div[@class="count__T3YO8"]'))
@@ -611,7 +765,7 @@ def collect_additional_data(driver, blog_data):
                 neighbors = int(neighbors_text.replace("명의 이웃", "").replace(",", "").strip())
             except Exception:
                 neighbors = 0
-
+            
             # 최근 글 발행 시간 가져오기
             try:
                 last_post_time = WebDriverWait(driver, 1).until(
@@ -641,6 +795,9 @@ def filter_and_transform_links(service, spreadsheet_id, sheet_name):
     """
     스프레드시트에서 C열(링크)과 H열(신청 여부)을 읽어 필터링 후 반환합니다.
     """
+    #혹시 스프레드시트의 변동 사항이 있을 수도 있으니..
+    initialize_sheet(service, SPREADSHEET_ID, DEFAULT_SHEET_NAME)
+
     data = read_from_sheet(service, spreadsheet_id, sheet_name, "A:H")  # A~H 열 읽기
     filtered_links = []
     for idx, row in enumerate(data[1:], start = 2):  # 첫 행(헤더) 제외
@@ -657,7 +814,7 @@ def convert_to_mobile_link(link):
     return f"https://m.blog.naver.com/{parts[3]}"
 
 
-def add_neighbors(driver, links, message, max_count=100):
+def add_neighbors(driver, links, message, _group_name, max_count=100):
     """
     Selenium을 사용해 서로이웃 추가를 수행하며, 자정을 감지하여 작업을 중단한 뒤 이어서 실행합니다.
     
@@ -695,18 +852,41 @@ def add_neighbors(driver, links, message, max_count=100):
             return i  # 중단된 작업의 인덱스를 반환
 
         if not open_webpage(driver, link):
-            return
-
+            return -5
         try:
             # 이웃추가 버튼 클릭
             wait_and_click(driver, '//*[@id="root"]/div[4]/div/div[3]/div[1]/button')
             # 서로이웃 옵션 클릭
             if wait_and_click(driver, '//*[@id="bothBuddyRadio"]'):
+                #그룹을 선택해주세요 클릭
+                wait_and_click(driver, '//*[@id="buddyGroupSelect"]')
+                
+                # Select 객체 생성 (select 태그를 찾음)
+                select_element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "buddyGroupSelect"))
+                )
+                select = Select(select_element)
+                
+                # 옵션 선택 (텍스트로 선택)
+                select.select_by_visible_text(_group_name)
+                
                 # 메시지 입력
                 text_area = driver.find_element(By.XPATH, '//*[@id="buddyAddForm"]/fieldset/div/div[2]/div[3]/div/textarea')
+                text_area.clear()
                 text_area.send_keys(message)
                 # 확인 버튼 클릭
                 wait_and_click(driver, '/html/body/ui-view/div[2]/a[2]')
+
+                try:
+                    _popup_message = driver.find_element(By.XPATH, '//*[@id="lyr6"]/div/div[1]/p').text
+                    if _popup_message == "선택 그룹의 이웃수가 초과되어 이웃을 추가할 수 없습니다 다른 그룹을 선택해주세요":
+                        #이게 뜨면 그룹을 바꿔주는 기능을 자동으로 넣거나..
+                        #아니면 사용자에게 직접 그룹을 만들어서 추가하라는 등의 요구를 해야 할 듯.
+                        #서로이웃 신청한 기록을 삭제해주는 기능을 넣어서 해결하는 방법도 있고.
+                        return -4
+
+                except:
+                    pass
                 count += 1
             
             
@@ -762,6 +942,7 @@ def update_sheet(service, spreadsheet_id, sheet_name, nickname, status, count, r
 
 # 스프레드시트 저장 및 읽기
 if __name__ == "__main__":
+    global service
 
     #웹드라이버 설정
     driver = setup_driver()
@@ -772,6 +953,8 @@ if __name__ == "__main__":
 
     # 네이버 로그인 함수 호출
     naver_login(driver, NAVER_ID, NAVER_PASSWORD)
+    time.sleep(1)
+    group_name_check(driver, MY_BLOG_NICKNAME)
 
     initialize_gui()
     window.mainloop()
